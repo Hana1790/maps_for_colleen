@@ -1,0 +1,28 @@
+{
+    "id": "80F4E7D0",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1778525465111.0,
+    "source_on_save": false,
+    "relative_order": 7,
+    "properties": {
+        "id": "8db0a4f6e4bb4c7e8281ff8268963d1d",
+        "name": "river_list",
+        "title": "river_list",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1778524744,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1778525465111,
+    "read_only": false,
+    "read_only_alternatives": []
+}

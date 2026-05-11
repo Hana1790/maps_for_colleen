@@ -39,4 +39,20 @@ ggplot() +
                fill = alpha("gray90", 0.9),
                color = "black", linewidth = 0.75, inherit.aes = FALSE) +
   geom_sf(data=nw_ohio_rivers, fill="blue")
+
+
+# 2. Split into a list of dataframes by a unique river name/ID column
+river_list <- nw_ohio_rivers %>% 
+  group_split(PNAME) 
+
+# 3. Create a folder for the output
+dir.create("individual_rivers")
+
+rivers = c("AUGLAIZE R", "BEAN CR")
+# 4. Save each river to a new shapefile
+for(riv in rivers){
+  river_data <- riv
+  river_name <- unique(river_data$PNAME) # Replace column name
+  st_write(river_data, paste0("individual_rivers/", river_name, ".shp"))
+}
 ```
