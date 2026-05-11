@@ -1,0 +1,498 @@
+---
+title: "in-class dynamic mapping"
+author: "Patrick Bitterman"
+date: "2026-04-07"
+output: html_document
+---
+
+# Today's schedule
+
+- Open discussion
+- Intro to Leaflet (https://rstudio.github.io/leaflet/)
+
+
+
+Packages
+
+```{r}
+library(tidyverse)
+library(terra)
+library(sf)
+library(leaflet) #new
+library(leaflet.extras) #new
+```
+
+# Leaflet
+
+Leaflet is....
+
+...a Javascript library with an API we can access in R. 
+
+Wait, that's a LOT of jargon. Can we add some clarity?
+
+- **JavaScript**: programming language that runs inside web browsers. It powers interactive behavior on almost every website you use
+- **Library**: collection of pre-written code that solves a specific problem. Leaflet is a JS library built specifically for interactive maps — someone else wrote the hard parts, and we use the result
+- **API (Application Programming Interface)**:  set of functions and rules that lets one piece of software talk to another. Leaflet's API is the list of commands you can give it: "add a tile layer," "add a marker," etc.
+- **Access in R**: the `leaflet` R package is a *wrapper*: it translates your R code into JavaScript instructions that Leaflet understands, so you never have to write JavaScript yourself.
+
+```{r}
+
+```
+
+## Features of Leaflet
+- Interactive panning/zooming
+- Compose maps using arbitrary combinations of:
+    - Map tiles
+    - Markers
+    - Polygons
+    - Lines
+    - Popups
+    - GeoJSON
+    
+## Functionality
+- Create maps right from the R console or RStudio
+- Embed maps in knitr/R Markdown documents and Shiny apps
+- Easily render spatial objects from the sp or sf packages, or data frames with latitude/longitude columns
+- Use map bounds and mouse events to drive Shiny logic
+- Display maps in non spherical mercator projections
+- Augment map features using chosen plugins from leaflet plugins repository
+
+# A quick detour: Functional vs. Object-Oriented Programming
+
+Before we dive into examples, notice *how* Leaflet is written in R, as it reveals something important about programming paradigms.
+
+**Object-Oriented Programming (OOP)** organizes code around *objects* that bundle data and behavior together. You call methods on an object, which often mutates its state. The underlying JavaScript Leaflet library is OOP:
+
+```javascript
+// JavaScript (OOP style)
+var map = L.map('mapid');        // create an object
+map.setView([41.15, -81.35], 14); // call a method on it — mutates the object
+L.tileLayer('https://...').addTo(map); // another object added to the map
+```
+
+**Functional Programming (FP)** organizes code around *functions* that take inputs and return outputs — no hidden state changes. You compose functions together, passing the result of one as input to the next. The R leaflet package expresses the same idea in a functional style:
+
+```r
+# R (functional style)
+leaflet() %>%        # function returns a map object
+  setView(...) %>%   # function takes that object, returns a new one
+  addTiles()         # function takes that, returns a new one
+```
+
+Each `%>%` step is a function call. Nothing is mutated — each call produces a new value. This is the same philosophy as `dplyr`: `filter() %>% select() %>% mutate()`.
+
+**Key insight:** The R leaflet package wraps an OOP JavaScript library in a functional R interface. You build maps by composing functions, but the *result* is an object (you'll see an example later when we use `$` to inspect it).
+
+---
+
+# Demonstration
+
+A simple setup
+
+```{r}
+m <- leaflet()
+
+m
+```
+
+What do you get?
+
+
+Let's try again
+
+```{r}
+m <- leaflet() %>%
+  addTiles()
+
+m
+```
+
+And now? What do you see?
+
+
+Let's build on that
+
+```{r}
+m <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addMarkers(lng = -81.350903, lat = 41.150377, popup="Our McGilvrey Hall GIS Lab")
+    #could pass it as a series of data as well
+m
+```
+
+What about now?
+
+## Let's add some complexity
+
+Create some data to plot. Let's break this down a bit. What am I trying to do?
+
+```{r}
+
+# First let's define a color palette we can sample from - this is only really necessary for the demo
+mypal <- RColorBrewer::brewer.pal(12, "Set3") #making your own palette, 12 colors from set 3
+
+# start with a data frame
+df <- data.frame(
+  lat = rnorm(100) * 2 + 41, #creating a vector of 100 values with a normal distribution 
+  lng = rnorm(100) * 2 - 81.5, 
+  size = runif(100, 5, 20), #creates random deviates, number, min, max
+  color = sample(mypal, 100, replace = T) #assigning our custom palette
+)
+
+      # rnorm starts on 0, 1 as std
+      # he is pulling 100, multiplying by 2, and centering around our area
+      # runif, sampling from a uniform distribution (equal odds) in upper and lower tails
+      # We have only created the data, we didn't set it on the map
+
+# then add the data frame to a leaflet map
+m2 <- leaflet(df) %>% addTiles()
+
+m2
+```
+
+
+What do you get? Why?
+
+How can we interrogate the properties/attributes of an object?
+
+The `$` operator
+
+```{r}
+m2$x #we do this to look at what's inside
+```
+
+What do the data look like?
+
+> **OOP note:** Even though we *built* `m2` by composing functions (`leaflet() %>% addTiles()`), the result is an R object (an S3 list) with named properties. The `$` operator is how you access those properties, and it's the same way you'd access fields on an object in OOP. So we construct using functional paradigms, but get an OOP result.
+
+
+## Back to the show
+
+Let's try again to visualize it. Again, break down the code first
+
+```{r}
+# first one
+m2 %>% addCircleMarkers(radius = ~size, color = ~color, fill = FALSE)
+  # use ~ notation to assign the column name
+
+# second one
+m2 %>% addCircleMarkers(radius = runif(100, 4, 10), color = 'red') 
+  # only uses the color red, This makes new data instead of using the old data
+
+```
+
+What happened this time???
+
+Let's add some more tiles
+
+```{r}
+# Let's check out some other tiles
+
+m <- leaflet() %>% setView(lng = -81.34, lat = 41.145, zoom = 14)
+m %>% addTiles()
+
+
+# third party tiles using addProvider() function
+
+m %>% addProviderTiles(providers$Stadia.StamenToner) #black and white, diff fonts
+m %>% addProviderTiles(providers$CartoDB.Positron) # boring
+m %>% addProviderTiles(providers$CartoDB.DarkMatter) #all dark
+m %>% addProviderTiles(providers$Esri.NatGeoWorldMap) #has elevation data
+
+#can find more in the documentation for provider tiles
+```
+
+Give it a shot. What do you like?
+
+
+## Let's use some of our data
+
+```{r}
+parks <- sf::read_sf("./data/static_mapping/oh_parks.gpkg") %>%
+  sf::st_transform(., "EPSG:4326") # transform to WGS84 to make Leaflet happy
+
+# set up the map, zoom out a bit
+mp <- leaflet(data = parks) %>% setView(lng = -81.34, lat = 41.145, zoom = 10)
+mp %>% addTiles() %>% 
+  addPolygons(popup = ~NAME, label = ~NAME) #same idea as tmap, label shows up for a mouse
+
+
+```
+
+What's the difference between popup and label?
+
+
+
+## Lines
+
+Who wants to help break down this code?
+
+```{r}
+portage_streams <- sf::read_sf("./data/static_mapping/tl_2022_39133_linearwater/tl_2022_39133_linearwater.shp") %>%
+  sf::st_transform(., "EPSG:4326") # transform to WGS84 to make Leaflet happy
+
+leaflet(data = portage_streams) %>% 
+  setView(lng = -81.34, lat = 41.145, zoom = 10) %>% 
+  addTiles() %>%
+  addPolylines(., color = "blue", #because these are lines
+               popup = ~paste0(FULLNAME, ": ", LINEARID)) #creating new string
+              #paste0 puts the strings: it's ID
+
+```
+
+What happened?
+
+
+
+## Multiple layers
+
+(Note, there's a difference here in calling various datasets)
+
+```{r}
+m.both <- leaflet() %>% # not using the dataset as a parameter here - why not???
+  setView(lng = -81.34, lat = 41.145, zoom = 10) %>% 
+  addProviderTiles(providers$Esri.NatGeoWorldMap) %>%
+  addPolygons(data = parks, popup = ~NAME, label = ~NAME, color = "green") %>% #first layer
+  addPolylines(data = portage_streams, color = "blue", #second layer
+               popup = ~paste0(FULLNAME, ": ", LINEARID))
+
+m.both #multilayer map
+
+```
+
+
+# Let's practice
+
+- Add the municipal boundaries in Portage and Summit counties to this map (recall how we made our "study area" last week - you'll have to reuse last week's data)
+- Give them a "popup" corresponding to their name
+- And give the parks a color based on the TYPE of park.
+
+
+
+# Team activity
+
+- Everyone has reviewed the readings/walkthrough for this week (https://rstudio.github.io/leaflet/)
+- Today, we will...
+  1. break into teams
+  2. complete tasks using Leaflet
+  3. present (informally) your results, methods, challenges, etc. (maybe on Thursday)
+  
+- ALL DATA ARE SOMEWHERE IN THE REPOSITORY
+- All tasks are included in the various readings or documentation
+- For some of the extra challenges, you may need to look at the `leaflet.extras` package
+  
+## Tasks
+
+### GROUP 1
+
+- Make a choropleth map of the population density of Ohio Counties. There should be no more than 7 classes
+- When the user "mouses over" a polygon, a pop-up with the county name and population density should appear
+- Place a legend in the bottom-right corner
+
+#### Extra challenges: 
+1. Add a minimap to the interface
+2. Add a "locate me" button to the interface
+
+
+### GROUP 2
+
+- Make a map of the monitoring stations and removed dams in the Chesapeake Bay Watershed
+- The monitoring stations should be symbolized as a filled, semi-transparent circle with the size scaled to the Drainage Area of the station
+- Dam layer should be shaded by the year it was removed
+- Add controls to turn individual layers on and off
+
+#### Extra challenges:
+1. Use a custom icon for the dam layer
+2. Add a control to the interface to change the base map
+
+
+### GROUP 3
+
+- Using the Ohio county data and a variable of your choice from the BMP or demographic datasets, compute local Moran's I (LISA) quadrant assignments (you may need to review the activities from that week)
+- Make a choropleth map shaded by LISA quadrant (HH, HL, LH, LL) using a meaningful four-color palette
+- When the user clicks a county, a pop-up should display the county name and the local Moran p-value
+- Add a legend
+
+#### Extra challenges:
+1. Add a layer toggle control so the user can switch between the LISA quadrant map and the underlying variable choropleth
+2. Add a `setView()` call with a reasonable default zoom centered on Ohio
+
+amindianat/poptot proportion
+queen
+```{r}
+#choropleth map creation
+choropleth <- 
+  tm_shape(county_census) + 
+    tm_polygons(fill = "prop_amindianat", 
+                fill.scale = tm_scale_intervals(style = "jenks", 
+                                                values = "brewer.purples", n = 5),
+                fill.legend = tm_legend(title = "Proportion of American Indians 
+      and Native Americans")) + 
+    tm_borders(lwd = 1.5, col = "black") 
+
+#check choropleth map of American Indian/ Native American Population Proportion
+choropleth
+
+```
+
+
+
+```{r}
+
+library(tidyverse)
+library(terra)
+library(sf)
+library(leaflet) #new
+library(leaflet.extras) #new
+library(spdep)
+library(qualpalr)
+library(tmap)
+
+#read and join data
+oh_counties <- sf::read_sf("./data/static_mapping/oh_counties.gpkg")
+oh_census <- sf::read_sf("./data/static_mapping/oh_counties_DP2020.csv")
+
+county_join <-left_join(oh_counties,oh_census, join_by("GEOIDFQ" == "geoid"))
+
+#looking at native american population
+# doing a proportion of total population
+county_census <- county_join |> 
+  mutate(prop_amindianat = as.numeric(amindianat)/ as.numeric(poptotal))
+
+## Moran's I -LISA for native american population
+
+#Look at our data with a histogram and by county
+am.pop.counties <- county_census |> 
+    ggplot(aes(x = NAME, y = prop_amindianat)) +
+        geom_col(fill="steelblue") + 
+    labs(x="County Name",
+         y="Proportion of Population Per County",
+         title="Proportion of Native American Population in Ohio Counties") +
+        theme_minimal()
+
+am.pop.counties #very small proportions per county
+
+#check crs first
+sf::st_crs(county_census) 
+
+
+# Build spatial weights matrix
+coords <- sf::st_geometry(county_census)
+nb  <- spdep::poly2nb(county_census, queen = TRUE)
+#average number of links = 5.25, it accounts for all counties
+
+#row standardize the weights
+lw  <- spdep::nb2listw(nb, style = "W", zero.policy = TRUE)
+
+# Compute Local Moran's I
+lisa <- spdep::localmoran(county_census$prop_amindianat, lw, zero.policy = TRUE)
+county_census$local_I  <- lisa[, "Ii"] #moran's i column
+county_census$lisa_pval <- lisa[, "Pr(z != E(Ii))"] #moran's pvalue
+
+#LISA Quadrant Labels
+# Mean-center the variable and the spatial lag
+x     <- county_census$prop_amindianat
+x_lag <- lag.listw(lw, x, zero.policy = TRUE)
+
+x_mean     <- mean(x,     na.rm = TRUE)
+xlag_mean  <- mean(x_lag, na.rm = TRUE)
+
+
+# create the quadrants
+county_census <- county_census %>%
+  mutate(
+    quad = case_when(
+      x >  x_mean & x_lag >  xlag_mean ~ "HH",
+      x >  x_mean & x_lag <= xlag_mean ~ "HL",
+      x <= x_mean & x_lag >  xlag_mean ~ "LH",
+      x <= x_mean & x_lag <= xlag_mean ~ "LL"
+    ),
+    # Mark non-significant as NS (p > 0.05)
+    quad_sig = ifelse(lisa_pval > 0.05, "NS", quad))
+
+
+#creating the color scheme for the LISA
+county_census <- county_census |>
+  mutate(color =  case_when( #use this later to classify them
+                              quad_sig == "HH" ~ "#d7191c",
+                              quad_sig == "HL" ~ "#fdae61",
+                              quad_sig == "LH" ~ "#abd9e9",
+                              quad_sig == "LL" ~ "#2c7bb6",
+                              quad_sig == "NS" ~ "#d3d3d3")) #not significant p-values are grey
+
+
+#Popup to get the moran's i and the p-value
+county_census <- county_census %>%
+  mutate(
+    popup_lisa = paste0(
+      "<b>", NAME, " County</b><br>",
+      "LISA Quadrant: <b>", quad_sig, "</b><br>",
+      "Local Moran p-value: <b>", round(lisa_pval, 4), "</b>" ))
+
+#color palette for the leaflet - choropleth, not LISA
+#using the quantile method
+pal_purple <- colorQuantile(
+  palette = "Purples",
+  domain  = county_census$prop_amindianat,
+  n    = 4)    # adjust number of bins as you like
+
+
+
+#Reproject for Leaflet
+county_wgs <- st_transform(county_census, crs = 4326)
+
+#Map
+leaflet(county_wgs) %>%
+  addMapPane("choropleth", zIndex = 410) %>% #ranking which one comes first
+  addMapPane("lisa",     zIndex = 420) %>%
+  addProviderTiles(providers$Esri.NatGeoWorldMap,
+                   group = "NatGeo World Map")  %>% #base map 1
+  addProviderTiles(providers$Esri.WorldImagery,
+                   group = "Satellite View")  %>% #base map 2
+  setView(lng = -81.34, lat = 41.145, zoom = 6) %>% #SetView window and zoom
+  addPolygons( #start with choropleth map
+    group = "Choropleth Map",
+      fillColor = ~pal_purple(prop_amindianat),#purple palette and native american proportion
+      fillOpacity = 0.9,
+      color = "black",    
+      weight = 1,
+      options = pathOptions(pane = "choropleth")
+  ) %>%
+  addPolygons( #LISA quadrant map
+    group= "LISA Quadrant",
+    fillColor   = ~color,
+    fillOpacity = 0.9,
+    color       = "black",
+    weight      = 2,
+    popup       = ~popup_lisa,
+    highlightOptions = highlightOptions(
+      weight       = 2,
+      fillOpacity  = 0.9,
+      bringToFront = TRUE
+    )) %>%
+  addLegend(
+  position = "bottomright", #stacking legends
+  title    = "LISA Quadrant",
+  colors   = c("#d7191c", "#fdae61", "#abd9e9", "#2c7bb6", "#d3d3d3"), #rewriting, had an issue with length of variable
+  labels   = c("HH – High-High (cluster)",
+               "HL – High-Low (outlier)",
+               "LH – Low-High (outlier)",
+               "LL – Low-Low (cluster)",
+               "NS – Not Significant"),
+  opacity  = 0.9) %>%
+  addLegend( #legend for the other choropleth
+  position = "bottomright",
+  title    = "Native American Population Proportions",
+  pal   = pal_purple,
+  values   = ~prop_amindianat,
+  opacity  = 1) %>%
+  addLayersControl(
+    baseGroups = c("NatGeo World Map", "Satellite View"), 
+    overlayGroups = c("Choropleth Map", "LISA Quadrant"), 
+    options = layersControlOptions(collapsed = FALSE))
+
+
+```
+https://r-statistics.co/Interactive-Maps-in-R-with-leaflet.html
+https://rstudio.github.io/leaflet/articles/colors.html#continuous-input-discrete-colors-colorbin-and-colorquantile
+

@@ -1,0 +1,42 @@
+---
+title: "maps for colleen"
+author: "Hana Esber"
+date: "2026-05-11"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(ggmap)
+library(ggplot2)
+library(sf)
+library(ggspatial)
+library(rnaturalearth) #add lake erie in
+
+# Load in shapefile of just rivers in ohio
+oh_rivers_all <- sf::read_sf("./OH_Rivers.shp")
+#huc of Maumee from dashboard
+maumee_huc6 <- sf::read_sf("./Maumee_6HUC_Dissolve.shp")
+
+#check crs of both
+st_crs(oh_rivers_all)
+st_crs(maumee_huc6)
+
+#transform this shapefile to NAD83 17N
+oh_rivers_all <- st_transform(oh_rivers_all, st_crs(maumee_huc6))
+
+#cut the rivers to just NW ohio
+nw_ohio_rivers <- sf::st_intersection(oh_rivers_all, maumee_huc6)
+
+#quick plot
+plot(nw_ohio_rivers)
+
+# create basic map of ohio
+ohio <- map_data("state", region = c("ohio"), exact=TRUE, interior = FALSE)
+
+#plot to see if the rivers are there
+ggplot() +
+  geom_sf(data = maumee_huc6,
+               fill = alpha("gray90", 0.9),
+               color = "black", linewidth = 0.75, inherit.aes = FALSE) +
+  geom_sf(data=nw_ohio_rivers, fill="blue")
+```

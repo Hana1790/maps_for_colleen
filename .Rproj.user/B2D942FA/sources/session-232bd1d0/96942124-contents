@@ -1,0 +1,269 @@
+---
+title: "Veg Accretion Water Depths"
+author: "Kenneth Anderson"
+date: "2025-11-24"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = 'C:/Users/kande120/OneDrive - Kent State University/Documents/GitHub')
+```
+
+
+```{r warning=FALSE, message=FALSE}
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(purrr)
+library(rlang)
+library(cowplot)
+library(dataRetrieval)
+library(tibble)
+library(ggplot2)
+library(tidyverse)
+library(zoo)
+library(readr)
+library(scales)
+library(terra)
+library(ggplot2)
+library(tidyterra)
+library(RColorBrewer)
+library(viridis)
+library(mgcv)
+library(knitr)
+library(riem)
+library(nasapower)
+library(geosphere)
+library(elevatr)
+library(tidyterra)
+library(sf)
+```
+
+# TRUC hydroperiod
+```{r}
+
+```
+
+
+# OAK
+
+## Water Depth Data
+We'll start by loading in all our water depth data from the different sensors: 
+
+```{r}
+pool30 = read.csv("data-releases/sensor_network/ntwk_oake_pool30_WY25_primflag_v25.2_20251001.csv")
+pool31 = read.csv("data-releases/sensor_network/ntwk_oake_pool31_WY25_primflag_v25.2_20251001.csv")
+pool36 = read.csv("data-releases/sensor_network/ntwk_oake_pool36_WY25_primflag_v25.2_20251001.csv")
+pool39 = read.csv("data-releases/sensor_network/ntwk_oake_pool39_WY25_primflag_v25.2_20251001.csv")
+pool40 = read.csv("data-releases/sensor_network/ntwk_oake_pool40_WY25_primflag_v25.2_20251001.csv")
+pool42 = read.csv("data-releases/sensor_network/ntwk_oake_pool42_WY25_primflag_v25.2_20251001.csv")
+
+# make a df with each pool and the coordinates for it's sensor
+dfs <- list("30" = pool30,"31" = pool31,"36" = pool36,"39" = pool39,"40" = pool40,"42" = pool42)
+sensor_coords <- imap_dfr(dfs, ~ .x %>% slice(1) %>% transmute(pool = as.numeric(.y), coord_x, coord_y))
+
+
+```
+
+
+## Bathymetry Data
+Our first step is to use bathymetry data from the site
+
+```{r}
+# Specify the path to the DEM file
+dem_file <- "annual-report/nutrient_budgets/BGSU/OAKW_E/OAKs_dem_update_m.tif"
+
+# Load the DEM raster data
+dem_raster <- rast(dem_file)
+crs(dem_raster) <- "EPSG:32616"
+
+# Make a polygon to crop out OAKE
+lon <- c(-83.688684, -83.688747, -83.687556, -83.682414, -83.680546, -83.682251)
+lat <- c(41.023413, 41.024727, 41.026816, 41.027762,41.027558, 41.023788)
+
+# Create a polygon
+polygon_coords <- cbind(lon, lat)
+
+# Create a spatial object from the coordinates using longitude and latitude (WGS84, EPSG:4326)
+polygon <- vect(polygon_coords, type = "polygons", crs = "EPSG:4326")  # EPSG:4326 is for lon/lat (WGS84)
+
+# make the pool polygon the same CRS as the DEM 
+polygon_utm <- project(polygon, crs(dem_raster))
+
+# Clip the DEM to the pool extent
+OAKE_dem <- crop(dem_raster, polygon_utm)  # Clip the DEM to the pool bounds
+OAKE_dem <- mask(OAKE_dem, polygon_utm)    # Mask to remove values outside the polygon
+
+# load in sediment trap coordinates
+sedtraps = read.csv("annual-report/veg_accretion/Michaels_HABRI_sed_trap_locations_20251211.csv")
+sedtraps_OAK = subset(sedtraps, project_code == "OAKE")
+# remove the screwed up point:
+sedtraps_OAK <- subset(sedtraps_OAK, latitude <= 41.5)
+# Convert points to SpatVector (WGS84)
+pts <- vect(sedtraps_OAK, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+# Reproject to match DEM
+pts_utm <- project(pts, OAKE_dem)
+
+# load in sensor coordinates
+sensors_OAK = sensor_coords
+# Convert points to SpatVector (WGS84)
+senpts <- vect(sensors_OAK, geom = c("coord_x", "coord_y"), crs = "EPSG:4326")
+# Reproject to match DEM
+senpts_utm <- project(senpts, OAKE_dem)
+
+# plot it out
+ggplot() +
+  geom_spatraster(data = OAKE_dem) +
+  geom_spatvector(data = pts_utm, color = "red", size = 3) +
+  geom_spatvector(data = senpts_utm, color = "blue", size = 3) +
+  scale_fill_viridis_c() +
+  coord_sf(crs = "EPSG:32616", expand = FALSE) +
+  theme_minimal()
+
+```
+We're going to pick out the nearest sensor to each sediment trap. 
+```{r}
+# convert data
+sensors_sf <- st_as_sf(sensor_coords, coords = c("coord_x", "coord_y"), crs = 4326)
+sedtraps_sf <- st_as_sf(sedtraps_OAK, coords = c("longitude", "latitude"), crs = 4326)
+# find nearest sensor
+closest <- st_nearest_feature(sedtraps_sf, sensors_sf)
+# add to df
+sedtraps_OAK$pool <- sensors_sf$pool[closest]
+```
+
+Now we'll extract the elevation for each sensor and each sediment trap.
+```{r}
+# Extract the elevation at the sensor location to correct sensor depths for a TOTAL pool depth
+sensor_utm <- st_transform(sensors_sf, crs(OAKE_dem)) # make it the same crs as DEM
+sensor_coords$elevation_sensor_m <- terra::extract(OAKE_dem, vect(sensor_utm))[,2]
+# Extract the elevation at the sediment traps
+sedtraps_utm <- st_transform(sedtraps_sf, crs(OAKE_dem)) # make it the same crs as DEM
+sedtraps_OAK$elevation_trap_m <- terra::extract(OAKE_dem, vect(sedtraps_utm))[,2]
+
+```
+
+Now we can start calculating depth based on specific points <br>
+
+### Pool 31/40 
+The trap on the edge of pool 40 is slightly closer to the sensor at pool 31 but I think pool 40 is more representative of it's flood regime. So we're just going to use pool 40. <br> 
+
+But overall what we're going to do is: <br>
+1. find the difference in elevation between the sensor and the sediment traps <br>
+2. correct the water depth based on that difference. 
+
+```{r}
+# take just the traps around pool 40
+sedtraps_40 = subset(sedtraps_OAK, pool == 40 | pool == 31)
+# Add in the elevation of the sensor
+sedtraps_40$elevation_sensor_m <- sensor_coords$elevation_sensor_m[sensor_coords$pool == 40]
+# calculate the difference in elevation between the sensor and the point
+sedtraps_40$diff_m = sedtraps_40$elevation_trap_m - sedtraps_40$elevation_sensor_m
+# depth data is in mm so convert our difference so it matches
+sedtraps_40$diff_mm = sedtraps_40$diff_m * 1000
+# turn 10 minute data to daily data
+pool40$datetime = as.POSIXct(pool40$datetime)
+pool40$date = as.Date(pool40$datetime)
+depth40 = pool40 %>%  group_by(date) %>%  summarise(Water.Depth = mean(whgt, na.rm=TRUE)) 
+
+# make a function
+compute_depths <- function(depth_df, sedtrap_df) {
+  for(q in sedtrap_df$quadrat_id) {diff_val <- sedtrap_df$diff_mm[sedtrap_df$quadrat_id == q]
+    depth_df[[paste0(q, "_depth")]] <- depth_df$Water.Depth - diff_val  }
+  depth_df}
+
+depth40_quadrats <- compute_depths(depth40, sedtraps_40)
+depth40_quadrats$pool40_depth = depth40$Water.Depth # rename so when we combine it's still included
+```
+
+### Pool 39 
+We're going to do the same as above but now with pool 39
+
+```{r}
+# take just the traps around pool 39
+sedtraps_39 = subset(sedtraps_OAK, pool == 39)
+# Add in the elevation of the sensor
+sedtraps_39$elevation_sensor_m <- sensor_coords$elevation_sensor_m[sensor_coords$pool == 39]
+# calculate the difference in elevation between the sensor and the point
+sedtraps_39$diff_m = sedtraps_39$elevation_trap_m - sedtraps_39$elevation_sensor_m
+# depth data is in mm so convert our difference so it matches
+sedtraps_39$diff_mm = sedtraps_39$diff_m * 1000
+# turn 10 minute data to daily data
+pool39$datetime = as.POSIXct(pool39$datetime)
+pool39$date = as.Date(pool39$datetime)
+depth39 = pool39 %>%  group_by(date) %>%  summarise(Water.Depth = mean(whgt, na.rm=TRUE)) 
+# calculate depths with the function we already made
+depth39_quadrats <- compute_depths(depth39, sedtraps_39)
+depth39_quadrats$pool39_depth = depth39$Water.Depth # rename so when we combine it's still included
+```
+
+### Pool 42 
+This is where things get a bit dicey. One of the traps is in pool 32 where we don't have a sensor but it's right next to pool 42 so we're going to assume it follows similar water levels to pool 42 because that's the best data we have available.  
+
+```{r}
+# take just the traps around pool 42
+sedtraps_42 = subset(sedtraps_OAK, pool == 42)
+# Add in the elevation of the sensor
+sedtraps_42$elevation_sensor_m <- sensor_coords$elevation_sensor_m[sensor_coords$pool == 42]
+# calculate the difference in elevation between the sensor and the point
+sedtraps_42$diff_m = sedtraps_42$elevation_trap_m - sedtraps_42$elevation_sensor_m
+# depth data is in mm so convert our difference so it matches
+sedtraps_42$diff_mm = sedtraps_42$diff_m * 1000
+# turn 10 minute data to daily data
+pool42$datetime = as.POSIXct(pool42$datetime)
+pool42$date = as.Date(pool42$datetime)
+depth42 = pool42 %>%  group_by(date) %>%  summarise(Water.Depth = mean(whgt, na.rm=TRUE)) 
+
+# calculate depths with the function we already made
+depth42_quadrats <- compute_depths(depth42, sedtraps_42)
+depth42_quadrats$pool42_depth = depth42$Water.Depth # rename so when we combine it's still included
+```
+
+### Pool 36 
+This is where things get really dicey. These three traps really aren't very close to pool 36 at all. I'd take these values with a grain of salt. 
+
+```{r}
+# take just the traps around pool 36
+sedtraps_36 = subset(sedtraps_OAK, pool == 36)
+# Add in the elevation of the sensor
+sedtraps_36$elevation_sensor_m <- sensor_coords$elevation_sensor_m[sensor_coords$pool == 36]
+# calculate the difference in elevation between the sensor and the point
+sedtraps_36$diff_m = sedtraps_36$elevation_trap_m - sedtraps_36$elevation_sensor_m
+# depth data is in mm so convert our difference so it matches
+sedtraps_36$diff_mm = sedtraps_36$diff_m * 1000
+# turn 10 minute data to daily data
+pool36$datetime = as.POSIXct(pool36$datetime)
+pool36$date = as.Date(pool36$datetime)
+depth36 = pool36 %>%  group_by(date) %>%  summarise(Water.Depth = mean(whgt, na.rm=TRUE)) 
+
+# calculate depths with the function we already made
+depth36_quadrats <- compute_depths(depth36, sedtraps_36)
+depth36_quadrats$pool36_depth = depth36$Water.Depth # rename so when we combine it's still included
+```
+
+
+Combing everything together! 
+```{r}
+# take out the Water.Depth columns and join our dfs
+depth_quadrats <- depth36_quadrats %>% select(!"Water.Depth") %>%
+  full_join(depth42_quadrats %>% select(!"Water.Depth"), by = "date") %>%
+  full_join(depth39_quadrats %>% select(!"Water.Depth"), by = "date") %>%
+  full_join(depth40_quadrats %>% select(!"Water.Depth"), by = "date")
+
+head(depth_quadrats)
+write.csv(depth_quadrats, "annual-report/veg_accretion/depth_quadrats.csv", row.names = FALSE)
+```
+
+
+## Summary Stats
+
+```{r}
+depth_quadrats$year = year(depth_quadrats$date)
+depth_quadrats$month = month(depth_quadrats$date)
+depth_quadrats <- depth_quadrats %>% # add in the wateryear
+  mutate(year_num = as.numeric(as.character(year)), wateryear = case_when(month %in% c(10, 11, 12) ~ year_num + 1,TRUE ~ year_num)) %>%  select(-year_num)  
+
+
+depth_quadrats %>% group_by(wateryear) %>%
+  summarise(across(-date, ~ sum(.x > 0, na.rm = TRUE)))
+```

@@ -1,0 +1,2240 @@
+---
+title: "2025_TRUC_ICI_Analysis"
+author: "Hana Esber"
+date: "2026-01-05"
+output: html_document
+---
+This code is largely coming from Mike's "2022-2023_MAGM_ICI" R file, but changed slightly for the intact core incubation I did at Trumbull Creek in October 2025. 
+
+Last date updated: 1/5/2026 HE
+
+Author: Mike Back
+Organization: Kent State University
+Project: 2022-2023 Magee Marsh Nutrient Flux
+R version: 4.2.1
+Date updated:9/27/2023
+
+##Import Data
+I am changing my section a bit here from mike's because I pre-entered the data into my csv by hand from the data that came off of the skalar. In his code, he does it from R and exports the data to a csv.
+
+I am keeping the part where he has the detection limit being changed. He explained how that comes from the skalar screenshots we take so if you have something that is below that detection limit, it is given a single value. this analysis needs to have a value so ignoring them is not as ideal.
+
+He also mentioned how the time series might not truly be relevant because I did not do a reflooding experiment and it is hard to do a time series with one incubation because it has the assumption that the first 24 hours the cores are the most disturbed and odd things could be happening. The 48 hours should be the most stable and understandable, but then the last 72 hours would be a bottle neck effect and there isn't that realistic of data going on. The time series is really just the concentration on the y and the time point on the x if I was interested in exploring it.
+
+
+```{r}
+library(tidyverse)
+library(forcats) #deciding order of bars
+library(patchwork) #stacking plot panels
+library(cowplot) #stacking plot panels
+library(ggpubr) #prints correlation on ggplot
+
+#Processing skalar data for detection limits
+data <- read.csv("C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/20251208_SkalarData_NOx_OP_NH3.csv", stringsAsFactors = T)
+
+data <- data %>% 
+  mutate(in_NO3_ugL = replace(in_NO3_ugL, in_NO3_ugL < 3.99, (3.99/2))) %>% 
+  mutate(out_NO3_ugL = replace(out_NO3_ugL, out_NO3_ugL < 3.99, (3.99/2))) %>% 
+  mutate(in_orthoP_ugL = replace(in_orthoP_ugL, in_orthoP_ugL < 3.66, (3.66/2))) %>% 
+  mutate(out_orthoP_ugL = replace(out_orthoP_ugL, out_orthoP_ugL < 3.66, (3.66/2))) %>%
+  mutate(in_NH3_ugL = replace(in_NH3_ugL, in_orthoP_ugL < 7.85, (7.85/2))) %>% 
+  mutate(out_NH3_ugL = replace(out_NH3_ugL, out_orthoP_ugL < 7.85, (7.85/2)))
+
+View(data)
+
+data$core_id <- as.factor(data$core_id)
+data$year <- as.factor(data$year)
+
+```
+
+
+
+##Calulate Flux For Each Nutrient
+```{r}
+#calulate the flow rate for each core based off of the mL/min and core surface area recorded during incubation
+data <- data %>% 
+  mutate(data, flow_rate_L_hr_m2 = 
+           ((flow_rate / 1000) * 60) / core_sa_m2)#divide by 1000 to convert mL to L and multiple by 60 to convert min to hours
+
+
+##orthoP flux
+oP_flux <- data %>% #this calulates flux of each core at each of the three time points
+  arrange(habitat) %>% #so you can better see groups of the same patch types
+  group_by(core_id, habitat, time) %>% #this line allows you to see all three of these variables in the final table
+  summarize(oP_flux_mg_m2_d = (out_orthoP_ugL - in_orthoP_ugL) * flow_rate_L_hr_m2/ 1000 * 24)#convert from ug to mg and hr to day
+
+#re ordering or changing factor levels of habitat names
+oP_flux <- oP_flux %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+oP_flux_mean_time <- oP_flux %>% #average the three time points for each core
+  summarize(oP_flux_mg_m2_d = mean(oP_flux_mg_m2_d))
+
+
+oP_flux_habitat <- oP_flux %>% group_by(habitat) %>% #average each of the habitat(patch) flux from all three of the cores and all three of their time points
+  summarize(SE = sd(oP_flux_mg_m2_d) / sqrt(9), oP_flux_mg_m2_d = mean(oP_flux_mg_m2_d))#N=9 because 3 cores X 3 time points
+
+
+##NO3 flux
+NO3_flux <- data %>% arrange(habitat) %>% group_by(core_id, habitat, time) %>% #same code as above
+  summarize(NO3_flux_mg_m2_d = (out_NO3_ugL - in_NO3_ugL) * flow_rate_L_hr_m2 / 1000 * 24)
+
+#re ordering factor level of habitat
+NO3_flux <- NO3_flux %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+NO3_flux_mean_time <- NO3_flux %>% summarize(NO3_flux_mg_m2_d = mean(NO3_flux_mg_m2_d))
+
+
+NO3_flux_habitat <- NO3_flux %>% group_by(habitat) %>% 
+  summarize(SE = sd(NO3_flux_mg_m2_d) / sqrt(9), NO3_flux_mg_m2_d = mean(NO3_flux_mg_m2_d))
+
+## NH3 flux
+NH3_flux <- data %>% arrange(habitat) %>% group_by(core_id, habitat, time) %>% #same code as above
+  summarize(NH3_flux_mg_m2_d = (out_NH3_ugL - in_NH3_ugL) * flow_rate_L_hr_m2 / 1000 * 24)
+
+
+#re ordering factor level of habitat
+NH3_flux <- NH3_flux %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+NH3_flux_mean_time <- NH3_flux %>% summarize(NH3_flux_mg_m2_d = mean(NH3_flux_mg_m2_d))
+
+
+NH3_flux_habitat <- NH3_flux %>% group_by(habitat) %>% 
+  summarize(SE = sd(NH3_flux_mg_m2_d) / sqrt(9), NH3_flux_mg_m2_d = mean(NH3_flux_mg_m2_d))
+```
+
+
+## combine all three flux data
+```{r}
+##Combine all three nutrient flux data
+flux_data_oPandNO3 <- right_join(oP_flux_mean_time, 
+                                 NO3_flux_mean_time, 
+                                 by = c("core_id", "habitat"))
+flux_data <- right_join(flux_data_oPandNO3, 
+                        NH3_flux_mean_time, 
+                        by = c("core_id", "habitat"))
+
+#re ordering or changing factor levels of habitat names
+flux_data <- flux_data %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+
+write.csv(flux_data, "C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/2025_TRUC_ICI_fluxes_NO3oPNH3.csv", row.names=FALSE)
+
+## combining nutrient flux data NOTTTT averaged
+all_fluxes_oPandNO3 <- right_join(oP_flux, 
+                                 NO3_flux, 
+                                 by = c("core_id", "time", "habitat"))
+all_flux_data <- right_join(all_fluxes_oPandNO3, 
+                        NH3_flux, 
+                        by = c("core_id", "time", "habitat"))
+
+write.csv(all_flux_data, "C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/2025_TRUC_ICI_all_flux_nutrients.csv")
+
+
+#update csv file with these new columns
+write.csv(mastersheet, "20251208_SkalarData_NOx_OP_NH3_mastersheet.csv", row.names = FALSE)
+
+
+
+
+
+## creating a new column for ugL to be converted to mgL (divide by 1000)
+#read in this csv and set working directory
+setwd('C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/')
+mastersheet <- read_csv("./data/20251208_SkalarData_NOx_OP_NH3_mastersheet.csv")
+
+#refactoring the levels
+ mastersheet <- mastersheet %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+ #refactoring the levels
+ mastersheet <- mastersheet %>%
+  mutate(fill_order = factor(fill_order,
+    levels = c("1", "2", "3", "4", "5")))
+ 
+
+```
+
+
+## Time series for inflow nutrient concentrations
+```{r}
+inflow_no3_concentrations<-
+  data %>% group_by(time, habitat) %>% 
+  ggplot(aes(x = time, y = in_NO3_ugL)) + 
+  geom_point() + 
+  facet_grid(cols=vars(habitat))
+
+inflow_no3_concentrations
+
+inflow_oP_concentrations<-
+  data %>% group_by(time, habitat) %>% 
+  ggplot(aes(x = time, y = in_orthoP_ugL)) + 
+  geom_point() + 
+  facet_grid(cols=vars(habitat))
+
+inflow_NH3_concentrations<-
+  data %>% group_by(time, habitat) %>% 
+  ggplot(aes(x = time, y = in_NH3_ugL)) + 
+  geom_point() + 
+  facet_grid(cols=vars(habitat))
+
+
+ggsave("C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/flux_figures_2025/inflow_no3_nutrientconcentrations.jpeg", 
+       plot=inflow_no3_concentrations, height=10, width=20, units=c("cm"), dpi=600)
+
+ggsave("C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/flux_figures_2025/inflow_oP_nutrientconcentrations.jpeg", 
+       plot=inflow_oP_concentrations, height=10, width=20, units=c("cm"), dpi=600)
+
+ggsave("C:/Users/Hana/Documents/masters/TrumbullCreek/TRUC_ICI_Data_Analysis_20251009/flux_figures_2025/inflow_NH3_nutrientconcentrations.jpeg", 
+       plot=inflow_NH3_concentrations, height=10, width=20, units=c("cm"), dpi=600)
+
+
+```
+
+
+## Boxplot of flux by habitat
+starting my own data analysis here instead of using mike's time series. might come back to that later... tbd
+```{r}
+#boxplot of flux by habitat type
+no3_flux<- 
+  ggplot(mastersheet, aes(x=habitat, y=NO3_flux_mg_m2_d)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    theme_classic()
+no3_flux
+
+# no3 flux without the "dry" habitat outlier near 150mg
+### data frame with the 150 value as na
+mastersheet <- mastersheet %>%
+  mutate(out_NO3_ugL = na_if(out_NO3_ugL, 410.82)) %>%
+  mutate(NO3_flux_mg_m2_d = na_if(NO3_flux_mg_m2_d, 151.429824))
+
+
+no3_flux_NA<-
+  ggplot(mastersheet, aes(x=habitat, y=NO3_flux_mg_m2_d)) + 
+    geom_boxplot(fill="#785EF0", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Location Characterisitics", 
+         y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)"),
+         title="All Cores Sediment and Surface Water NO3 Flux (mg/m2/d)") +
+    theme_classic()
+
+no3_flux_NA
+
+ggsave(filename = "no3_flux_habitat.png", 
+       plot = no3_flux_NA, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same graph but for ortho P
+orthoP_flux<- 
+  ggplot(mastersheet, aes(x=habitat, y=oP_flux_mg_m2_d)) + 
+    geom_boxplot(fill="#FFB000", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Location Characterisitics", 
+         y = expression("SRP Flux (mg/m"^" 2"*"/d)"),
+         title="All Cores Sediment and Surface Water SRP Flux (mg/m2/d)") +
+    theme_classic()
+
+orthoP_flux
+
+ggsave(filename = "orthoP_flux_habitat.png", 
+       plot = orthoP_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same graph but for NH3
+nh3_flux<- 
+  ggplot(mastersheet, aes(x=habitat, y=NH3_flux_mg_m2_d)) + 
+    geom_boxplot(fill="#1E88E5", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Location Characterisitics", 
+         y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)"),
+         title="All Cores Sediment and Surface Water Ammonia Flux (mg/m2/d)") +
+    theme_classic()
+
+nh3_flux
+
+ggsave(filename = "NH3_flux_habitat.png", 
+       plot = nh3_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+## Bar plots with 0 having an axis too
+```{r}
+library(forcats) #deciding order of bars
+
+# barplot of NO3 flux
+barplot_no3_flux <- NO3_flux %>% 
+  mutate(habitat = fct_relevel(habitat, 
+            "dry", "slightly_inundated", "more_inundated", 
+            "standing_water", "fully_inundated")) %>%
+  group_by(habitat) %>% 
+  summarize(m = mean(NO3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NO3_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = habitat, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#785EF0") + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = NO3_flux, aes(x = habitat, y = NO3_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of NOx", 
+       x = NULL, 
+       y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)"), 
+       shape = " Time")+
+  scale_x_discrete(labels = c("Dry", "Slightly\nInundated", "Moderately\nInundated", "Fully\nInundated", "Standing\nWater")) +
+  theme_classic() + 
+  ylim(-2,3) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_no3_flux
+
+ggsave(filename = "barplot_no3_flux_habitat.png", 
+       plot = barplot_no3_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same for OrthoP
+barplot_oP_flux <- oP_flux %>% 
+  mutate(habitat = fct_relevel(habitat, 
+            "dry", "slightly_inundated", "more_inundated", 
+            "standing_water", "fully_inundated")) %>%
+  group_by(habitat) %>% 
+  summarize(m = mean(oP_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(oP_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = habitat, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#FFB000", alpha=0.8) + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = oP_flux, aes(x = habitat, y = oP_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of SRP", 
+       x = NULL, 
+       y = expression("SRP Flux (mg/m"^" 2"*"/d)"), 
+       shape = " Time")+
+  scale_x_discrete(labels = c("Dry", "Slightly\nInundated", "Moderately\nInundated", "Fully\nInundated", "Standing\nWater")) +
+  theme_classic() + 
+  ylim(-2,2) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_oP_flux
+
+ggsave(filename = "barplot_oP_flux_habitat.png", 
+       plot = barplot_oP_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same for NH3
+barplot_NH3_flux <- NH3_flux %>% 
+  mutate(habitat = fct_relevel(habitat, 
+            "dry", "slightly_inundated", "more_inundated", 
+            "standing_water", "fully_inundated")) %>%
+  group_by(habitat) %>% 
+  summarize(m = mean(NH3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NH3_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = habitat, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#1E88E5", alpha=0.8) + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = NH3_flux, aes(x = habitat, y = NH3_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of Ammonia", 
+       x = NULL, 
+      y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)"), 
+       shape = " Time")+
+  scale_x_discrete(labels = c("Dry", "Slightly\nInundated", "Moderately\nInundated", "Fully\nInundated", "Standing\nWater")) +
+  theme_classic() + 
+  ylim(-500,1200) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_NH3_flux
+
+ggsave(filename = "pH_inflow_boxplot.png", 
+       plot = pH_inflow_boxplot, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+## Barplots by coreid
+same idea but grouping by core instead of habitat
+```{r}
+# barplot of NO3 flux core id
+barplot_no3_flux_core <- NO3_flux %>% 
+  group_by(core_id) %>% 
+  summarize(m = mean(NO3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NO3_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = core_id, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#785EF0") + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = NO3_flux, aes(x = core_id, y = NO3_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of NOx by Core Id", 
+       x = NULL, 
+       y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)"), 
+       shape = " Time")+
+  theme_classic() + 
+  ylim(-2,3) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_no3_flux_core
+
+ggsave(filename = "barplot_no3_flux_coreid.png", 
+       plot = barplot_no3_flux_core, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same for OrthoP
+barplot_oP_flux_core <- oP_flux %>% 
+  group_by(core_id) %>% 
+  summarize(m = mean(oP_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(oP_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = core_id, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#FFB000", alpha=0.8) + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = oP_flux, aes(x = core_id, y = oP_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of SRP by Core Id", 
+       x = NULL, 
+       y = expression("SRP Flux (mg/m"^" 2"*"/d)"), 
+       shape = " Time")+
+  theme_classic() + 
+  ylim(-4.5,2) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_oP_flux_core
+
+ggsave(filename = "barplot_oP_flux_coreid.png", 
+       plot = barplot_oP_flux_core, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+
+## same for NH3
+barplot_NH3_flux_core <- NH3_flux %>% 
+  group_by(core_id) %>% 
+  summarize(m = mean(NH3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NH3_flux_mg_m2_d, na.rm = TRUE)/sqrt(3)) %>% 
+  ggplot(aes(x = core_id, y = m)) + 
+  geom_bar(stat = "identity", 
+           color = "black", 
+           position = position_dodge(0), 
+           width = 0.8, 
+           fill = "#1E88E5", alpha=0.8) + 
+  geom_errorbar(aes(ymin = m-se, ymax = m+se), 
+                width = .2,
+                position = position_dodge(.8)) +
+  geom_point(data = NH3_flux, aes(x = core_id, y = NH3_flux_mg_m2_d, shape=time),
+             position = position_dodge(), 
+             size = 2) + 
+  labs(title = "Sediment and Surface Water Flux of Ammonia by Core Id", 
+       x = NULL, 
+       y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)"), 
+       shape = " Time")+
+  theme_classic() + 
+  ylim(-500,1100) + 
+  theme(text = element_text(size = 15)) + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0)
+
+barplot_NH3_flux_core
+
+ggsave(filename = "barplot_NH3_flux_coreid.png", 
+       plot = barplot_NH3_flux_core, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+##### putting them on top of each other #######
+library(patchwork)
+combined <-barplot_no3_flux_core/barplot_oP_flux_core/barplot_NH3_flux_core
+combined
+ggsave(filename = "barplot_oP_flux_timepoint_new.png", 
+       plot = barplot_oP_flux_timepoint, 
+       width = 10, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+```
+
+
+## Barplot new
+```{r}
+
+#Barplot colors 
+  bar_colors <- c("#f0f0f0", "#bdbdbd","#969696","#636363","#252525")
+  shape_colors <- c("#F0E442", "#56B4E9","#009E73","#CC79A7")
+
+#gathering nutrient flux
+#fluxes_gathered <- gather(mastersheet, "nutrient", "flux", 18:20)  #gather data to have one column of nutrient type and one column of flux values
+  
+#new facet labels for time 1, 2, 3 
+time_names <- as_labeller(c(`T1` = "24 Hours", `T2` = "48 Hours", `T3` = "72 Hours"))
+ 
+# SRP plot by Time point
+barplot_oP_flux_timepoint <-mastersheet %>% 
+  filter(!is.na(fill_order)) %>%
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(oP_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(oP_flux_mg_m2_d, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = mastersheet,
+             aes(x = fill_order,
+                 y = oP_flux_mg_m2_d,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Sediment and Surface Water Flux of Phosphate",
+       x = NULL,
+       y = expression("Phosphate Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  facet_grid(~ time, labeller = time_names) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) +
+  coord_cartesian(ylim = c(-4, 2)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_oP_flux_timepoint
+
+# NOx plot by Time point
+barplot_NO3_flux_timepoint <-mastersheet %>% 
+  filter(!is.na(fill_order)) %>%
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(NO3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NO3_flux_mg_m2_d, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = mastersheet,
+             aes(x = fill_order,
+                 y = NO3_flux_mg_m2_d,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Sediment and Surface Water Flux of NO3",
+       x = NULL,
+       y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  facet_grid(~ time) +
+  coord_cartesian(ylim = c(-2,3)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom")
+
+barplot_NO3_flux_timepoint
+
+## NH4 plot by Time point
+barplot_NH4_flux_timepoint <-mastersheet %>% 
+  filter(!is.na(fill_order)) %>%
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(NH3_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(NH3_flux_mg_m2_d, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = mastersheet,
+             aes(x = fill_order,
+                 y = NH3_flux_mg_m2_d,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Sediment and Surface Water Flux of NH4",
+       x = NULL,
+       y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  facet_grid(~ time) +
+  coord_cartesian(ylim = c(-500,1100)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom")
+
+barplot_NH4_flux_timepoint
+
+
+```
+
+#Average Core Nutrient Flux
+```{r}
+# reading in mastersheet first
+mastersheet <- read_csv("./data/20251208_SkalarData_NOx_OP_NH3_mastersheet.csv")
+
+# removing the outliers before processing
+mastersheet <- mastersheet %>%
+  mutate(out_NO3_ugL = na_if(out_NO3_ugL, 410.82),
+         NO3_flux_mg_m2_d = na_if(NO3_flux_mg_m2_d, 151.429824))
+
+# Taking the average for NH3,NOx, Ortho P from each core over 3 time periods
+core_nutrient_fluxes <- mastersheet %>% 
+  group_by(core_id) %>% # sqrt of sum of the number, bc I removed outliers
+  summarize(NO3_n = sum(!is.na(NO3_flux_mg_m2_d)),
+            NO3_flux_mg_m2_d = mean(NO3_flux_mg_m2_d, na.rm = TRUE),
+            NH3_n = sum(!is.na(NH3_flux_mg_m2_d)),
+            NH3_flux_mg_m2_d = mean(NH3_flux_mg_m2_d, na.rm = TRUE),
+            oP_n = sum(!is.na(oP_flux_mg_m2_d)),
+            oP_flux_mg_m2_d = mean(oP_flux_mg_m2_d, na.rm = TRUE)) %>%
+  mutate(NO3_SE = sd(NO3_flux_mg_m2_d, na.rm = TRUE) / sqrt(NO3_n),
+         NH3_SE = sd(NH3_flux_mg_m2_d, na.rm = TRUE) / sqrt(NH3_n),
+         oP_SE = sd(oP_flux_mg_m2_d, na.rm = TRUE) / sqrt(oP_n),
+    NO3_color = ifelse(NO3_flux_mg_m2_d > 0, "Release", "Retention"),
+    NH3_color = ifelse(NH3_flux_mg_m2_d > 0, "Release", "Retention"),
+    oP_color = ifelse(oP_flux_mg_m2_d > 0, "Release", "Retention")) 
+  # if flux > 0, then release, if not, retention
+
+# plot NO3 average flux per core
+barplot_core_NO3 <- core_nutrient_fluxes %>% 
+  ggplot(aes(x = core_id, y = NO3_flux_mg_m2_d, fill = NO3_color)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = NO3_flux_mg_m2_d - NO3_SE, 
+                      ymax = NO3_flux_mg_m2_d + NO3_SE),
+                width = 0.2) +
+  scale_fill_manual(values = c("Release" = "#daa520",
+                               "Retention" = "#228B22")) +
+  labs(title = "Sediment and Surface Water Flux of Dissolved NO3",
+       x = NULL,
+       y = expression("NO3 Flux" * " (mg/m"^"2"*"/d)"),
+       fill = "Average Flux") +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_core_NO3
+
+# plot NH3 average flux per core
+barplot_core_NH3 <- core_nutrient_fluxes %>% 
+  ggplot(aes(x = core_id, y = NH3_flux_mg_m2_d, fill = NH3_color)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = NH3_flux_mg_m2_d - NH3_SE, 
+                      ymax = NH3_flux_mg_m2_d + NH3_SE),
+                width = 0.2) +
+  scale_fill_manual(values = c("Release" = "#daa520",
+                               "Retention" = "#228B22")) +
+  labs(title = "Sediment and Surface Water Flux of Dissolved NH3",
+       x = NULL,
+       y = expression("NH3 Flux" * " (mg/m"^"2"*"/d)"),
+       fill = "Average Flux") +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_core_NH3
+
+# plot oP average flux per core
+barplot_core_oP <- core_nutrient_fluxes %>% 
+  ggplot(aes(x = core_id, y = oP_flux_mg_m2_d, fill = oP_color)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = oP_flux_mg_m2_d - oP_SE, 
+                      ymax = oP_flux_mg_m2_d + oP_SE),
+                width = 0.2) +
+  scale_fill_manual(values = c("Release" = "#daa520",
+                               "Retention" = "#228B22")) +
+  labs(title = "Sediment and Surface Water Flux of Dissolved oP",
+       x = NULL,
+       y = expression("oP Flux" * " (mg/m"^"2"*"/d)"),
+       fill = "Average Flux") +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_core_oP
+```
+
+
+#physico data
+```{r}
+#mastersheet with the addition of physico data
+physico_data <- read_csv("20251208_SkalarData_physico_nutrients.csv")
+
+# Subset rows where 'group' is NOT NA
+core_physico <- physico_data[!is.na(physico_data$group), ]
+
+ #refactoring the levels
+ core_physico <- core_physico %>%
+  mutate(fill_order = factor(fill_order,
+    levels = c("1", "2", "3", "4", "5")))
+
+#plot DO, pH over time for the cores
+barplot_DO <-core_physico %>% 
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(DO_mg, na.rm = TRUE),
+            se = sd(DO_mg, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = core_physico,
+             aes(x = fill_order,
+                 y = DO_mg,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Core Dissolved Oxygen Measurements",
+       x = NULL,
+       y = "DO (mg/L)") +
+  facet_grid(~ time) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom")
+
+barplot_DO
+
+#pH barplot over time
+barplot_pH <-core_physico %>% 
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(pH, na.rm = TRUE),
+            se = sd(pH, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = core_physico,
+             aes(x = fill_order,
+                 y = pH,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Core pH Measurements",
+       x = NULL,
+       y = "pH") +
+  facet_grid(~ time) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom")
+
+barplot_pH
+
+
+#SPC barplot
+barplot_SPC <-core_physico %>% 
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(cond, na.rm = TRUE),
+            se = sd(cond, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = core_physico,
+             aes(x = fill_order,
+                 y = cond,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Core Conductivity Measurements",
+       x = NULL,
+       y = "Conductivity (microSiemens/cm)") +
+  facet_grid(~ time) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom")
+
+barplot_SPC
+
+
+### Boxplots
+DO_boxplot <- core_physico %>%
+  group_by(fill_order, time) %>%
+  ggplot(aes(x=fill_order, y=DO_mg)) + 
+    geom_boxplot(aes(fill=fill_order), alpha=0.8) + 
+    geom_point() +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  labs(x=NULL, 
+         y = "Dissolved Oxygen (mg/L)") +
+    facet_grid(~time) +
+    theme_bw() +
+    theme(
+      legend.position = "bottom")
+
+DO_boxplot
+
+#pH boxplot
+pH_boxplot <- core_physico %>%
+  group_by(fill_order, time) %>%
+  ggplot(aes(x=fill_order, y=pH)) + 
+    geom_boxplot(aes(fill=fill_order), alpha=0.8) + 
+    geom_point() +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  labs(x=NULL, 
+         y = "pH") +
+    facet_grid(~time) +
+    theme_bw() +
+    theme(
+      legend.position = "bottom")
+
+pH_boxplot
+
+#SPC boxplot
+SPC_boxplot <- core_physico %>%
+  group_by(fill_order, time) %>%
+  ggplot(aes(x=fill_order, y=cond)) + 
+    geom_boxplot(aes(fill=fill_order), alpha=0.8) + 
+    geom_point() +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  labs(x=NULL, 
+         y = "Conductivity (microSiemens/cm)") +
+    facet_grid(~time) +
+    theme_bw() +
+    theme(
+      legend.position = "bottom")
+
+SPC_boxplot
+```
+
+
+#inflow water
+```{r}
+#filter just inflow data 
+inflow_data <- physico_data[physico_data$core_id %in% c("InflowA", "InflowB", "InflowC", "InflowD"), ]
+
+#boxplots of different nutrients
+Inflow_NH3_boxplot <-
+  inflow_data %>% group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=in_NH3_mgL)) + 
+    geom_boxplot(fill= "#1E88E5", alpha=0.8) + 
+    geom_point() +
+    labs(x="Inflow", 
+         y = expression("NH"["4"]^" +" * " Concentration" * " (mg/L)")) +
+    theme_bw() +
+   theme(axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),# Increase size
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12)) # Make y larger
+
+Inflow_NH3_boxplot
+
+#NOX
+Inflow_NO3_boxplot <-
+  inflow_data %>% group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=in_NO3_mgL)) + 
+    geom_boxplot(fill= "#785EF0", alpha=0.8) + 
+    geom_point() +
+    labs(x="Inflow", 
+         y = expression("NO"["3"]^" -" * " Concentration" * " (mg/L)")) +
+    theme_bw()+
+   theme(axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),# Increase size
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12)) # Make y larger
+
+Inflow_NO3_boxplot
+
+#SRP
+Inflow_SRP_boxplot <-
+  inflow_data %>% group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=in_orthoP_mgL)) + 
+    geom_boxplot(fill= "#FFB000", alpha=0.8) + 
+    geom_point() +
+    labs(x="Inflow", 
+         y = "SRP Concentration (mg/L") +
+    theme_bw() +
+   theme(axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12))
+
+Inflow_SRP_boxplot
+
+
+#physico measurements too
+pH_inflow_boxplot <- inflow_data %>% 
+  group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=pH)) + 
+    geom_boxplot(aes(fill=core_id)) + 
+    geom_point() +
+  labs(x=NULL, 
+         y = "pH",
+       fill="Inflow Source") +
+    theme_bw() +
+    theme(
+      legend.position = "bottom",
+      axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12))
+
+pH_inflow_boxplot
+
+#DO 
+DO_inflow_boxplot <- inflow_data %>% 
+  group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=DO_mg)) + 
+    geom_boxplot(aes(fill=core_id)) + 
+    geom_point() +
+  labs(x=NULL, 
+         y = "Dissolved Oxygen (mg/L)",
+       fill="Inflow Source") +
+    theme_bw() +
+    theme(
+      legend.position = "bottom",
+      axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12))
+
+DO_inflow_boxplot
+
+#SPC 
+SPC_inflow_boxplot <- inflow_data %>% 
+  group_by(core_id) %>%
+  ggplot(aes(x=core_id, y=cond)) + 
+    geom_boxplot(aes(fill=core_id)) + 
+    geom_point() +
+  labs(x=NULL, 
+         y = "Specific Conductivity microSiemens/cm)",
+       fill="Inflow Source") +
+    theme_bw() +
+    theme(
+      legend.position = "bottom",
+      axis.text.x = element_text(size = 12),
+         axis.title.x = element_text(size = 12),
+         axis.text.y = element_text(size = 12),
+         axis.title.y = element_text(size = 12))
+
+SPC_inflow_boxplot
+```
+
+
+
+
+#Core time series
+
+talked with Mike and I think it would be good to explore some time series data for each of the cores and look at the three nutrients near each other at all three of the timepoints
+```{r}
+#Creating a time series of oP first
+core_list <- split(oP_flux, oP_flux$core_id)
+
+make_core_plot <- function(data) {
+  core_id <- unique(data$core_id)
+
+  ggplot(data, aes(x = time, y = oP_flux_mg_m2_d, group = 1)) + 
+    geom_point(shape = 21, color = "black", fill = "#69b3a2", size = 3) + 
+    geom_line() + 
+    labs(title = core_id, y = expression("SRP Flux (mg/m"^" 2"*"/d)")) +
+    ylim(-5, 4)+
+    theme_bw()
+}
+
+core_time_series <- lapply(core_list, make_core_plot)
+
+
+core_time_series[["A1"]]
+core_time_series[["A2"]]
+core_time_series[["A3"]]
+core_time_series[["A4"]]
+core_time_series[["B1"]]
+core_time_series[["B2"]]
+core_time_series[["B3"]]
+core_time_series[["B4"]]
+core_time_series[["C1"]]
+core_time_series[["C2"]]
+core_time_series[["C3"]]
+core_time_series[["C4"]]
+core_time_series[["D1"]]
+core_time_series[["D2"]]
+core_time_series[["D3"]]
+core_time_series[["E1"]]
+core_time_series[["E2"]]
+core_time_series[["E3"]]
+core_time_series[["E4"]]
+
+#displaying the plots together
+library(cowplot)
+library(patchwork)
+
+oP_timeseries_core_fluxes <-
+  plot_grid(plotlist = core_time_series, nrow = 5, ncol = 4)
+
+oP_timeseries_core_fluxes
+
+
+ggsave(filename = "oP_timeseries_core_fluxes.png", 
+       plot = oP_timeseries_core_fluxes, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+
+## same for Nh3
+NH3_core_list <- split(NH3_flux, NH3_flux$core_id)
+
+make_core_plot_NH3 <- function(data) {
+  core_id <- unique(data$core_id)
+
+  ggplot(data, aes(x = time, y = NH3_flux_mg_m2_d, group = 1)) + 
+    geom_point(shape = 21, color = "black", fill = "#69b3a2", size = 3) + 
+    geom_line() + 
+    labs(title = core_id, y = expression("NH"["4"]^" +" * " (mg/m"^"2"*"/d)")) +
+    ylim(-900, 1200)
+}
+
+core_time_series <- lapply(NH3_core_list, make_core_plot_NH3)
+
+NH3_timeseries_core_fluxes <-
+  plot_grid(plotlist = core_time_series, nrow = 5, ncol = 4)
+
+NH3_timeseries_core_fluxes
+
+
+ggsave(filename = "NH3_timeseries_core_fluxes.png", 
+       plot = NH3_timeseries_core_fluxes, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+## same for NO3
+NO3_core_list <- split(NO3_flux, NO3_flux$core_id)
+
+make_core_plot_NO3 <- function(data) {
+  core_id <- unique(data$core_id)
+
+  ggplot(data, aes(x = time, y = NO3_flux_mg_m2_d, group = 1)) + 
+    geom_point(shape = 21, color = "black", fill = "#69b3a2", size = 3) + 
+    geom_line() + 
+    labs(title = core_id, y = expression("NO"["3"]^" +" * " (mg/m"^"2"*"/d)")) +
+    ylim(-5, 5)
+}
+
+core_time_series <- lapply(NO3_core_list, make_core_plot_NO3)
+
+NO3_timeseries_core_fluxes <-
+  plot_grid(plotlist = core_time_series, nrow = 5, ncol = 4)
+
+NO3_timeseries_core_fluxes
+
+
+ggsave(filename = "NO3_timeseries_core_fluxes.png", 
+       plot = NO3_timeseries_core_fluxes, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+
+## subsetting out each of the sampling times to see them side by side 
+```{r}
+
+#boxplot of flux by habitat type
+time_series_no3_flux <-
+  NO3_flux %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=NO3_flux_mg_m2_d)) + 
+    geom_boxplot(fill="slateblue", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+time_series_no3_flux
+
+ggsave(filename = "time_series_no3_flux_boxplot.png", 
+       plot = time_series_no3_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+#boxplot of P flux by habitat type
+time_series_oP_flux <-
+  oP_flux %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=oP_flux_mg_m2_d)) + 
+    geom_boxplot(fill= "#FFB000", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("SRP Flux (mg/m"^" 2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+time_series_oP_flux
+
+ggsave(filename = "time_series_oP_flux_boxplot.png", 
+       plot = time_series_oP_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+#boxplot of NH3 flux by habitat type
+time_series_NH3_flux <-
+  NH3_flux %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=NH3_flux_mg_m2_d)) + 
+    geom_boxplot(fill= "#1E88E5", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+time_series_NH3_flux
+
+ggsave(filename = "time_series_NH3_flux_boxplot.png", 
+       plot = time_series_NH3_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+
+```
+
+
+## Inflow vs flux concentration like mike did
+```{r}
+## linear regression of inflow to outflow concentrations
+#removing outlier from NOX
+data <- data[-1, ]
+
+library(ggpubr) #prints correlation on ggplot
+
+#restructure data
+data <- data %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "slightly_inundated", "more_inundated", "fully_inundated", "standing_water")))
+
+#linear model for NO3
+lm_fit <- lm(out_NO3_ugL ~ in_NO3_ugL, data = data)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001))
+
+
+NO3_regression <-
+  ggplot(data, aes(in_NO3_ugL, out_NO3_ugL, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "turquoise4") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("NO"[3]^"-" * " Inflow" * " (ugL)"),
+    y = expression("NO"[3]^"-" * " Outflow" * " (ugL)"),
+    title = "Inflow Concentrations of NOx Compared to Outflow",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -0.5, size = 4) +
+  theme_bw()
+
+NO3_regression
+
+# linear model formula for NH3
+lm_fit <- lm(out_NH3_ugL ~ in_NH3_ugL, data = data)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001)) 
+
+NH3_regression <-
+  ggplot(data, aes(in_NH3_ugL, out_NH3_ugL, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "turquoise4") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("NH"[4]^"+" * " Inflow" * " (ugL)"),
+    y = expression("NH"[4]^"+" * " Outflow" * " (ugL)"),
+    title = "Inflow Concentrations of NH4 Compared to Outflow",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -0.5, size = 4) +
+  theme_bw()
+
+NH3_regression
+
+
+#linear model for SRP
+lm_fit <- lm(out_orthoP_ugL ~ in_orthoP_ugL, data = data)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001)) 
+
+SRP_regression <-
+  ggplot(data, aes(in_orthoP_ugL, out_orthoP_ugL, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "turquoise4") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("SRP Inflow" * " (ugL)"),
+    y = expression("SRP Outflow" * " (ugL)"),
+    title = "Inflow Concentrations of SRP Compared to Outflow",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -1.5, size = 4) +
+  theme_bw()
+
+SRP_regression
+
+#saving regression figures
+ggsave(filename = "NO3_regression.png", 
+       plot = NO3_regression, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+## Linear models using the inflow concentration vs the outflow flux rate for each of the nutrients
+```{r}
+#linear model for  FLUX not just concentrations
+## Assigning the one NO3 outlier as a NA value. Only storing this in temporary, not the local version
+mastersheet <- read_csv("./20251208_SkalarData_NOx_OP_NH3_mastersheet.csv")
+
+mastersheet <- mastersheet %>%
+  mutate(out_NO3_ugL = na_if(out_NO3_ugL, 410.82)) %>%
+  mutate(NO3_flux_mg_m2_d = na_if(NO3_flux_mg_m2_d, 151.429824))
+         
+## SRP flux model
+lm_fit <- lm(oP_flux_mg_m2_d ~ in_orthoP_mgL, data = mastersheet)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001)) 
+
+SRP_flux_regression <-
+  ggplot(mastersheet, aes(in_orthoP_mgL, oP_flux_mg_m2_d, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "#D35FB7") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("SRP Inflow" * " (mgL)"),
+    y = expression("SRP Flux" * "(mg/m"^" 2"*"/d)"),
+    title = "Inflow Concentrations of SRP Compared to Flux",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -1.5, size = 4) +
+  theme_bw()
+
+SRP_flux_regression
+
+#linear model for NO3 
+lm_fit <- lm(NO3_flux_mg_m2_d ~ in_NO3_mgL, data = mastersheet)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001)) 
+
+NO3_flux_regression <-
+  ggplot(mastersheet, aes(in_NO3_mgL, NO3_flux_mg_m2_d, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "#D35FB7") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("NO3 Inflow" * " (mgL)"),
+    y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)"),
+    title = "Inflow Concentrations of NO3 Compared to Flux",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -10, size = 4) +
+  theme_bw()
+
+NO3_flux_regression
+
+
+#linear model for NH3 
+lm_fit <- lm(NH3_flux_mg_m2_d ~ in_NH3_mgL, data = mastersheet)
+r2 <- summary(lm_fit)$r.squared
+pval <- summary(lm_fit)$coefficients[2, 4]
+
+label_text <- paste0(
+  "R² = ", round(r2, 2), 
+  "\n", 
+  "p = ", format.pval(pval, digits = 3, eps = 0.001)) 
+
+NH3_flux_regression <-
+  ggplot(mastersheet, aes(in_NH3_mgL, NH3_flux_mg_m2_d, shape = habitat)) +
+  geom_point(size=3) +
+  geom_smooth(aes(group = 1), method = "lm", color = "#D35FB7") +
+  scale_shape_discrete(labels = c("Dry", "Slightly Inundated", "Moderately Inundated", "Fully Inundated", "Standing Water")) +
+  labs(
+    x = expression("NH3 Inflow" * " (mgL)"),
+    y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)"),
+    title = "Inflow Concentrations of NH3 Compared to Flux",
+    shape="Sampling Location") +
+  annotate( "text", x = Inf, y = -Inf,
+    label = label_text, hjust = 1.1, vjust = -10, size = 4) +
+  theme_bw()
+
+NH3_flux_regression
+
+#saving regression figures
+ggsave(filename = "SRP_flux_regression.png", 
+       plot = SRP_flux_regression, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+
+## Reordering plots based on Eileen's inundation levels
+```{r}
+#instead of doing my qualitative rank,I am reordering based on what areas are inundated first under the hypothetical 5 inches of inundation that Eileen calculated
+
+
+#refactoring the levels based on inundation regime
+ mastersheet <- mastersheet %>%
+  mutate(habitat = factor(habitat,
+    levels = c("dry", "standing_water", "fully_inundated", "slightly_inundated", "more_inundated")))
+
+#boxplot of flux by habitat type
+time_series_no3_flux <-
+  mastersheet %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=NO3_flux_mg_m2_d)) + 
+    geom_boxplot(fill="slateblue", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("NO"["3"]^" -" * " Flux" * " (mg/m"^"2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+time_series_no3_flux
+
+####### relabeling facets #######
+# Rename labels on the fly with a lookup character vector
+new_names <- as_labeller(c(`dry` = "Level 1 (Fills first)", `standing_water` = "Level 2", `fully_inundated` = "Level 3", `slightly_inundated` = "Level 4", `more_inundated` = "Level 5 (Fills Last)"))
+
+levels_time_series_NO3_flux <-time_series_no3_flux + facet_grid(~habitat, labeller = new_names)
+
+
+#boxplot of P flux by habitat type
+time_series_oP_flux <-
+  mastersheet %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=oP_flux_mg_m2_d)) + 
+    geom_boxplot(fill= "#FFB000", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("SRP Flux (mg/m"^" 2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+time_series_oP_flux
+
+levels_time_series_oP_flux <-time_series_oP_flux + facet_grid(~habitat, labeller = new_names)
+
+levels_time_series_oP_flux
+
+
+#boxplot of NH3 flux by habitat type
+time_series_NH3_flux <-
+  mastersheet %>% group_by(habitat) %>%
+  ggplot(aes(x=time, y=NH3_flux_mg_m2_d)) + 
+    geom_boxplot(fill= "#1E88E5", alpha=0.8) + 
+    geom_point() +
+    labs(x="Sampling Time Point", 
+         y = expression("NH"["4"]^" +" * " Flux" * " (mg/m"^"2"*"/d)")) +
+    facet_grid(cols=vars(habitat)) +
+    theme_bw()
+
+levels_time_series_NH3_flux <-time_series_NH3_flux + facet_grid(~habitat, labeller = new_names)
+
+levels_time_series_NH3_flux
+
+ggsave(filename = "levels_time_series_oP_flux_boxplot.png", 
+       plot = levels_time_series_oP_flux, 
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+
+```
+
+
+## Sediment Data!!!
+This is some of the data from BGSU (Corbin) minus the mehlich extractable phosphorus. Those sample ids are S04811-S04830,S04851-S04855 and include the actual sediment core samples at the last day of incubation (10/12/2025) as well as samples collected at the site before the cores were taken (10/09/2025)
+```{r}
+#CSV made from the original file that Corbin sent over (found in slack and github) that includes other samples that I did not take
+sediment_data <- read_csv("20260312_TRUC_ICI_sediment_samples_corbin_1.csv") #version 1 because the other csv file reads as an error for some reason (this one is UTF 8 CSV)
+
+#Corbin already has all of the values with their detection limit, mass used, and soil moisture accounted for in the Github
+
+#Barplot colors 
+  bar_colors <- c("#f0f0f0", "#bdbdbd","#969696","#636363","#252525")
+  sed_shape_colors <- c("#F0E442", "#56B4E9","#009E73","#CC79A7", "#836FFF")
+
+ #refactoring the levels
+ sediment_data <- sediment_data %>%
+  mutate(fill_order = factor(fill_order,
+    levels = c("1", "2", "3", "4", "5")))
+
+#plot total P per core and the composite (comp) sample
+sed_TP_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(total_mg_P_per_kg_soil, na.rm = TRUE),
+            se = sd(total_mg_P_per_kg_soil, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = total_mg_P_per_kg_soil,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples TP (mg/kg soil)",
+       x = NULL,
+       y = "TP (mg/kg soil)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_TP_barplot
+
+#total N per sample
+sed_TN_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(total_mg_N_per_kg_soil, na.rm = TRUE),
+            se = sd(total_mg_N_per_kg_soil, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = total_mg_N_per_kg_soil,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples TN (mg/kg soil)",
+       x = NULL,
+       y = "TN (mg/kg soil)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_TN_barplot
+
+#Water extractable DRP per sample
+sed_WE_DRP_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(WE_DRP_mg_P_per_kg_soil, na.rm = TRUE),
+            se = sd(WE_DRP_mg_P_per_kg_soil, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = WE_DRP_mg_P_per_kg_soil,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples Water Extractable DRP (mg/kg soil)",
+       x = NULL,
+       y = "WE DRP (mg/kg soil)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_WE_DRP_barplot
+
+#Water extractable NH3 per sample
+sed_WE_NH3_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(WE_NH3_mg_N_per_kg_soil, na.rm = TRUE),
+            se = sd(WE_NH3_mg_N_per_kg_soil, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = WE_NH3_mg_N_per_kg_soil,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples Water Extractable NH3 (mg/kg soil)",
+       x = NULL,
+       y = "WE NH3 (mg/kg soil)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_WE_NH3_barplot
+
+#Water extractable N03 per sample
+sed_WE_NOx_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(WE_NOx_mg_N_per_kg_soil, na.rm = TRUE),
+            se = sd(WE_NOx_mg_N_per_kg_soil, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = WE_NOx_mg_N_per_kg_soil,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples Water Extractable NOx (mg/kg soil)",
+       x = NULL,
+       y = "WE NOx (mg/kg soil)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_WE_NOx_barplot
+
+#pH per sample
+sed_pH_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(pH, na.rm = TRUE),
+            se = sd(pH, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = pH,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples pH",
+       x = NULL,
+       y = "pH") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_pH_barplot
+
+#electrical conductivity per sample
+sed_EC_barplot <- sediment_data %>% 
+  group_by(fill_order) %>% 
+  summarize(m  = mean(ECw_µS_per_cm, na.rm = TRUE),
+            se = sd(ECw_µS_per_cm, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>%
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+           width = 0.8,
+           alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = sediment_data, 
+             aes(x = fill_order,
+                 y = ECw_µS_per_cm,
+                 color = factor(reps),
+                 shape = factor(reps)), size = 3.5,
+             position = position_dodge()) +
+  guides(fill = guide_legend(override.aes = list(shape = NA)),
+         color= guide_legend(nrow=1), #put the legend in one row
+         shape= guide_legend(nrow=1)) + #get rid of black dots
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = sed_shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(15,16,17,18,19), name = "Replicate Core") +
+  labs(title = "Core and Composite Samples Electrical Conductance (µS/cm)",
+       x = NULL,
+       y = "Electrical Conductance (µS/cm)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom") 
+
+sed_EC_barplot
+
+#save figures
+ggsave(filename = "sed_WE_DRP_barplot.png",
+       plot = sed_WE_DRP_barplot, 
+       path = "flux_figures_2025",
+       width = 8, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+
+```
+
+
+## TRUC Monthly Budget
+Pulled these values from the annual report github (20260313)
+```{r}
+TRUC_month <- read_csv("TRUC_month.csv")
+
+#converting the column to be as date, but you need a "day" in there as well
+TRUC_month <- TRUC_month %>%
+  mutate(
+    month_date = as.Date(paste0("01-", date), format = "%d-%b-%Y"))  # %b = Jan, Feb, 
+
+#TP out per month of the water year and show only monthly breaks
+TP_out_budget_barplot <- TRUC_month %>% 
+  ggplot(aes(x = month_date, y = tp_out_lbs)) +
+    geom_col(color = "black",
+           width = 27,
+           alpha = 0.85) +
+  scale_x_date(date_labels = "%b-%Y", date_breaks = "1 month") +
+  labs(title = "Trumbull Creek Monthly Export of Total Phosphorus (lbs)",
+       x = "Month",
+       y = "Total Phosphorus Exported (lbs)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+    
+TP_out_budget_barplot
+
+#DRP out per month of the water year and show only monthly breaks
+DRP_out_budget_barplot <- TRUC_month %>% 
+  ggplot(aes(x = month_date, y = drp_out_lbs)) +
+    geom_col(color = "black",
+           width = 27,
+           alpha = 0.85) +
+  scale_x_date(date_labels = "%b-%Y", date_breaks = "1 month") +
+  labs(title = "Trumbull Creek Monthly Export of Dissolved Reactive Phosphorus (lbs)",
+       x = "Month",
+       y = "Dissolved Reactive Exported (lbs)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+    
+DRP_out_budget_barplot
+```
+
+
+#Ohio map
+```{r}
+## need to make a locator map of Ohio w lake erie
+#packages for spatial work
+library(tidyverse)
+library(ggmap)
+library(ggplot2)
+library(sf)
+library(ggspatial)
+library(rnaturalearth) #add lake erie in
+
+## map of ohio with lake erie
+# map_data() transforms maps::map data into ggplot-ready format
+ohio <- map_data("state", region = c("ohio"), exact=TRUE, interior = FALSE)
+counties <-map_data("county", region = "ohio")
+
+# ohio with TRUC outlined
+minerva <- data.frame(latitude = "-", longitude = "40.728554")
+
+ggplot() +
+  coord_sf(crs=4326) +
+  geom_polygon(data = ohio, aes(x = long, y = lat),
+               fill = alpha("gray90", 0.9),
+               color = "black", linewidth = 0.75, inherit.aes = FALSE) +
+  geom_polygon(data=counties, aes(x=long, y=lat, group=group),
+               fill="transparent", color="black") +
+  geom_point(data=minerva, x = -81.105377, y = 40.728554, shape = 8, color = "blue",
+             size=8, stroke=2.5) +
+  annotation_scale(location = "bl", bar_cols = c("black", "white")) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.4, "in"), pad_y = unit(0.28, "in")) +
+  theme_void() + 
+  theme(
+    plot.background = element_rect(fill = "transparent", colour = NA))
+
+# add in Lake erie data
+# Download the lakes data
+# Scale = 'medium' is usually sufficient for a clear outline
+lakes_sf <- ne_download(type = 'lakes', category = 'physical', returnclass = 'sf', scale = 'medium')
+
+# Filter the data for only Lake Erie
+lake_erie_sf <- lakes_sf %>%
+  filter(name == 'Lake Erie')
+
+# Create the ggplot of lake erie
+ggplot() +
+  geom_sf(data = lake_erie_sf, fill = "lightblue", color = "darkblue") +
+  # Optionally, set the coordinate system and adjust limits for better focus
+  coord_sf(xlim = c(-83.5, -78.5), ylim = c(41.2, 43)) +
+  labs(
+    title = "Outline of Lake Erie",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+
+
+# trying to combine lake erie and ohio
+locator_map <-
+  ggplot() +
+  coord_sf(crs=4326) +
+  geom_sf(data = lake_erie_sf, fill = "lightblue", color = "black", linewidth = 0.5) +
+  geom_sf_text(data = lake_erie_sf, aes(label = name), 
+      color = "black", size = 8, family="sans", angle=12, fontface="italic",
+      check_overlap = TRUE) +
+  geom_polygon(data = ohio, aes(x = long, y = lat),
+               fill = alpha("gray90", 0.9),
+               color = "black", linewidth = 0.5, inherit.aes = FALSE) +
+  geom_polygon(data=counties, aes(x=long, y=lat, group=group),
+               fill="transparent", color="black") +
+  geom_point(data=minerva, x = -81.105377, y = 40.728554, shape = 8, color = "hotpink",
+             size=8, stroke=2.5) +
+  annotation_scale(location = "bl", bar_cols = c("black", "white")) +
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.4, "in"), pad_y = unit(0.28, "in")) +
+  theme_void() + 
+  theme(
+    plot.background = element_rect(fill = "transparent", colour = NA))
+
+locator_map
+```
+
+
+
+
+
+## Calculate Flux for N2 and O2 dissolved gases
+
+copy code from above nutrient flux calc but change variable names for N2 and O2
+https://www.rdocumentation.org/packages/mimsy/versions/0.6.5/topics/mimsy
+
+I did not record the barometric pressure during the days I ran the MIMS so I am looking at the localconditions.com which uses NOAA METAR and Radar Weather data-sets https://www.localconditions.com/about.php, https://weatherspark.com/h/d/18170/2026/3/3/Historical-Weather-on-Tuesday-March-3-2026-in-Kent-Ohio-United-States#metar-11-51
+
+My three run dates: 
+-March 3 (started at 11) 30.16inHG
+-March 6 (started at 10) 30.18inHG
+-March 17 (started at 9) 29.92inHG
+
+```{r}
+library(tidyverse)
+library(forcats) #deciding order of bars
+library(patchwork) #stacking plot panels
+library(cowplot) #stacking plot panels
+library(ggpubr) #prints correlation on ggplot
+library(mimsy)
+library(readxl)
+
+#enter in the data
+data_gas1 <- read.csv("./data/2026_MIMS_TRUC_ICI_Data/mimsy_20260303_HEsber_TRUC_ICI_gas_run1.csv", stringsAsFactors = T)
+data_gas2 <- read.csv("./data/2026_MIMS_TRUC_ICI_Data/mimsy_20260306_HEsber_TRUC_ICI_gas_run2.csv", stringsAsFactors = T)
+data_gas3 <- read.csv("./data/2026_MIMS_TRUC_ICI_Data/mimsy_20260317_HEsber_TRUC_ICI_gas_run3.csv", stringsAsFactors = T)
+#Ran data on 3 separate days to get them all done. They all have different drift values associated with them
+
+# Look at the data frames
+str(data_gas1)
+head(data_gas1)
+View(data_gas1)
+
+## account for drift - converted inHG to atm
+# 30.16= 1.008, 30.18= 1.009, 29.92= 1.00
+
+# using mimsy to calculate the baseline drift - run 1 (3/3/26)
+gas1_results <- mimsy(data_gas1, baromet.press = 1.01, units='atm')
+gas1_results
+mimsy.save(gas1_results, "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260303_run1.xlsx")
+
+# using mimsy to calculate the baseline drift - run 2 (3/6/26)
+gas2_results <- mimsy(data_gas2, baromet.press = 1.01, units='atm')
+gas2_results
+mimsy.save(gas2_results, "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260306_run2.xlsx")
+
+# using mimsy to calculate the baseline drift - run 3 (3/17/26)
+gas3_results <- mimsy(data_gas3, baromet.press = 1.00, units='atm') #lower pressure this day
+gas3_results
+mimsy.save(gas3_results, "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260317_run3.xlsx")
+
+# Read in excel files - combine all of these spreadsheets
+#make a list of files
+files <- list(mimsy1= "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260303_run1.xlsx",
+              mimsy2= "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260306_run2.xlsx", 
+              mimsy3= "./data/2026_MIMS_TRUC_ICI_Data/mimsyCalcs_20260317_run3.xlsx")
+
+#one big excel sheet of results data
+files %>%
+  map_dfr(read_excel) %>%  # map_dfr automatically binds rows
+  write.csv(., "./data/2026_MIMS_TRUC_ICI_Data/Combined_gas_results_2025.csv", row.names = FALSE)
+ 
+```
+
+#calulate the flow rate for each core based off of the mL/min and core surface area recorded during incubation
+```{r}
+#adding the flow rate and time columns
+gas_2025 <- gas_2025 %>% 
+  mutate(., flow_rate_L_hr_m2 = 
+           ((flow_rate / 1000) * 60) / core_sa_m2,#divide by 1000 to convert mL to L and multiple by 60 to convert min to hours
+         time= str_extract(Label, "\\d+$"))
+
+#re-writing that csv to have these data
+write.csv(gas_2025, "./data/2026_MIMS_TRUC_ICI_Data/Combined_gas_results_2025.csv") 
+```
+
+
+# N2 flux
+```{r}
+#start here -->
+#reading in the final spreadsheet, most of the arranging of data was done in excel, fluxes calculated here:
+gas_fluxes_2025 <- read_csv("./data/2026_MIMS_TRUC_ICI_Data/final_gas_flux_TRUC_2025.csv")
+
+N2_flux <- gas_fluxes_2025 %>% #this calulates flux of each core at each of the three time points
+  arrange(fill_order) %>% #so you can better see groups of the same patch types
+  group_by(Label, fill_order, time) %>% #this line allows you to see all three of these variables in the final table
+  summarize(N2_flux_mg_m2_d = (out_N2_mgL - in_N2_mgL) * flow_rate_L_hr_m2 * 24)#convert from hr to day
+View(N2_flux)
+
+N2_flux_mean_time <- N2_flux %>% #average the three time points for each core
+  summarize(N2_flux_mg_m2_d = mean(N2_flux_mg_m2_d))
+View(N2_flux_mean_time)
+
+N2_flux_fill_order <- N2_flux %>% group_by(fill_order) %>% #average each of the habitat(patch) flux from all three of the cores and all three of their time points
+  summarize(SE = sd(N2_flux_mg_m2_d) / sqrt(9), N2_flux_mg_m2_d = mean(N2_flux_mg_m2_d))#N=9 because 3 cores X 3 time points
+View(N2_flux_fill_order)
+```
+
+
+
+
+##O2 flux
+```{r}
+O2_flux <- gas_fluxes_2025 %>% #this calulates flux of each core at each of the three time points
+  arrange(fill_order) %>% #so you can better see groups of the same patch types
+  group_by(Label, fill_order, time) %>% #this line allows you to see all three of these variables in the final table
+  summarize(O2_flux_mg_m2_d = (out_O2_mgL - in_O2_mgL) * flow_rate_L_hr_m2 * 24)#convert from hr to day
+View(O2_flux)
+
+O2_flux_mean_time <- O2_flux %>% #average the three time points for each core
+  summarize(O2_flux_mg_m2_d = mean(O2_flux_mg_m2_d))
+View(O2_flux_mean_time)
+
+O2_flux_fill_order <- O2_flux %>% group_by(fill_order) %>% #average each of the habitat(patch) flux from all three of the cores and all three of their time points
+  summarize(SE = sd(O2_flux_mg_m2_d) / sqrt(9), O2_flux_mg_m2_d = mean(O2_flux_mg_m2_d))#N=9 because 3 cores X 3 time points
+View(O2_flux_fill_order)
+
+```
+
+
+
+##Combine both gas flux data
+```{r}
+
+flux_data_gas <- right_join(N2_flux_mean_time, 
+                                 O2_flux_mean_time, 
+                                 by = c("Label", "fill_order", "time"))
+View(flux_data_gas)
+
+#made another spreadsheet to have only the averaged fluxes from this at each core location
+write.csv(flux_data_gas, "./data/2026_MIMS_TRUC_ICI_Data/only_fluxes_TRUC_2025.csv")
+
+
+#only the average for each of the inundation fill order 
+fill_order_fluxes <- right_join(O2_flux_fill_order,
+                                N2_flux_fill_order,
+                                by = "fill_order")
+#write this to a csv
+write.csv(fill_order_fluxes, "./data/2026_MIMS_TRUC_ICI_Data/fill_order_fluxes.csv")
+```
+
+#Gas Data Analysis
+```{r}
+library(tidyverse)
+library(forcats) #deciding order of bars
+library(patchwork) #stacking plot panels
+library(cowplot) #stacking plot panels
+library(ggpubr) #prints correlation on ggplot
+
+#read in only the fluxes sheet
+avg_flux_data <- read_csv("./data/2026_MIMS_TRUC_ICI_Data/only_fluxes_TRUC_2025.csv")
+
+# making sure the different categorical variables are factors, not chr or strings
+avg_flux_data <- avg_flux_data %>% 
+  mutate(across(c(fill_order, time, reps), as.factor))
+
+#Barplot colors from previous figures
+bar_colors <- c("#f0f0f0", "#bdbdbd","#969696","#636363","#252525")
+shape_colors <- c("#F0E442", "#56B4E9","#009E73","#CC79A7")
+
+#new facet labels for time 1, 2, 3 
+time_names <- as_labeller(c(`1` = "24 Hours", `2` = "48 Hours", `3` = "72 Hours"))
+
+#starting with plotting out the O2 gas data
+barplot_O2_gas <- avg_flux_data %>% 
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(O2_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(O2_flux_mg_m2_d, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = avg_flux_data,
+               aes(x = fill_order,
+                   y = O2_flux_mg_m2_d,
+                   color = factor(reps),
+                   shape = factor(reps)), size = 3,
+                   position = position_dodge()) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Sediment and Surface Water Flux of Dissolved O2",
+       x = NULL,
+       y = expression("O2 Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  facet_grid(~ time, labeller = time_names) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) +
+  #coord_cartesian(ylim = c(-4, 2)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_O2_gas
+
+
+## N2 gas flux
+barplot_N2_gas <- avg_flux_data %>% 
+  group_by(fill_order, time) %>% 
+  summarize(m  = mean(N2_flux_mg_m2_d, na.rm = TRUE),
+            se = sd(N2_flux_mg_m2_d, na.rm = TRUE) / sqrt(n()), .groups = "drop") %>% 
+  ggplot(aes(x = fill_order, y = m, fill = fill_order)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = m - se, ymax = m + se),
+                width = 0.2) +
+    geom_point(data = avg_flux_data,
+               aes(x = fill_order,
+                   y = N2_flux_mg_m2_d,
+                   color = factor(reps),
+                   shape = factor(reps)), size = 3,
+                   position = position_dodge()) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  scale_color_manual(values = shape_colors, name = "Replicate Core") +
+  scale_shape_manual(values = c(16, 15, 18, 17), name = "Replicate Core") +
+  labs(title = "Sediment and Surface Water Flux of Dissolved N2",
+       x = NULL,
+       y = expression("N2 Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  facet_grid(~ time, labeller = time_names) +
+  guides(fill = guide_legend(override.aes = list(shape = NA))) +
+  #coord_cartesian(ylim = c(-4, 2)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_N2_gas
+
+#save figures
+ggsave(filename = "barplot_core_oP.png", 
+       plot = barplot_core_oP,
+       path = "./flux_figures_2025",
+       width = 10, 
+       height = 6, 
+       units = "in", 
+       dpi = 600) 
+```
+
+#Average Gas Flux per inundation fill order
+```{r}
+#read in csv with only the average PER inundation fill order
+fill_order_fluxes_2025 <- read_csv("./data/2026_MIMS_TRUC_ICI_Data/fill_order_fluxes.csv")
+
+#making sure fill order is a factor
+fill_order_fluxes_2025$fill_order <- as.factor(fill_order_fluxes_2025$fill_order)
+
+barplot_inundation_N2 <- fill_order_fluxes_2025 %>% 
+  ggplot(aes(x = fill_order, y = N2_flux_mg_m2_d, fill = fill_order)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = N2_flux_mg_m2_d - SE.y, ymax = N2_flux_mg_m2_d + SE.y),
+                width = 0.2) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  labs(title = "Sediment and Surface Water Flux of Dissolved N2",
+       x = NULL,
+       y = expression("N2 Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_inundation_N2
+
+#now O2
+barplot_inundation_O2 <- fill_order_fluxes_2025 %>% 
+  ggplot(aes(x = fill_order, y = O2_flux_mg_m2_d, fill = fill_order)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = O2_flux_mg_m2_d - SE.x, ymax = O2_flux_mg_m2_d + SE.x),
+                width = 0.2) +
+  scale_fill_manual(values = bar_colors, name = "Inundation Fill Order") +
+  labs(title = "Sediment and Surface Water Flux of Dissolved O2",
+       x = NULL,
+       y = expression("O2 Flux" * " (mg/m"^"2"*"/d)")) +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_inundation_O2
+```
+
+# Average fluxes per CORE
+```{r}
+#read in only the fluxes sheet
+avg_flux_data <- read_csv("./data/2026_MIMS_TRUC_ICI_Data/only_fluxes_TRUC_2025.csv")
+
+# making sure the different categorical variables are factors, not chr or strings
+avg_flux_data <- avg_flux_data %>% 
+  mutate(across(c(fill_order, time, reps), as.factor),
+         core = str_sub(Label, start=1, end=2), #pulls the core name (first two strings) and puts it in a new column to group by
+         ) 
+
+# Taking the average for both N2 and O2 from each core over 3 time periods
+core_gas_fluxes <- avg_flux_data %>% 
+  group_by(core) %>% #average each of the cores from all three of their time points
+  summarize(O2_SE = sd(O2_flux_mg_m2_d) / sqrt(3), #N=3 because 1 core X 3 time points
+            O2_flux_mg_m2_d = mean(O2_flux_mg_m2_d),
+            N2_SE = sd(N2_flux_mg_m2_d) / sqrt(3), 
+            N2_flux_mg_m2_d = mean(N2_flux_mg_m2_d)) %>%
+  mutate(O2_color = ifelse(O2_flux_mg_m2_d > 0, "Release", "Retention"),
+         N2_color = ifelse(N2_flux_mg_m2_d > 0, "Release", "Retention")) 
+ 
+
+# plot O2 average flux per core
+barplot_core_O2 <- core_gas_fluxes %>% 
+  ggplot(aes(x = core, y = O2_flux_mg_m2_d, fill = O2_color)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = O2_flux_mg_m2_d - O2_SE, 
+                      ymax = O2_flux_mg_m2_d + O2_SE),
+                width = 0.2) +
+  scale_fill_manual(values = c("Release" = "#daa520",
+                                  "Retention" = "#228B22")) +
+  labs(title = "Sediment and Surface Water Flux of Dissolved O2",
+       x = NULL,
+       y = expression("O2 Flux" * " (mg/m"^"2"*"/d)"),
+       fill = "Average Flux") +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_core_O2
+
+# plot N2 average flux per core
+barplot_core_N2 <- core_gas_fluxes %>% 
+  ggplot(aes(x = core, y = N2_flux_mg_m2_d, fill = N2_color)) +
+    geom_col(color = "black",
+             width = 0.8,
+             alpha = 0.85) +
+    geom_errorbar(aes(ymin = N2_flux_mg_m2_d - N2_SE, 
+                      ymax = N2_flux_mg_m2_d + N2_SE),
+                width = 0.2) +
+  scale_fill_manual(values = c("Release" = "#daa520",
+                               "Retention" = "#228B22")) +
+  labs(title = "Sediment and Surface Water Flux of Dissolved N2",
+       x = NULL,
+       y = expression("N2 Flux" * " (mg/m"^"2"*"/d)"),
+       fill = "Average Flux") +
+  geom_hline(yintercept = 0, linewidth = 1) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    text = element_text(size = 18),
+    legend.position = "bottom")
+
+barplot_core_N2 
+```
+
